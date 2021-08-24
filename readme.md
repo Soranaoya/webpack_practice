@@ -1,329 +1,330 @@
-# Section 4
+# Section 5
 
 このブランチの前に行ったこと
 --------------------------------
 
-### 設定ファイルなしでのバンドル
-
-```shell
-% npx webpack --mode=development
-```
-webpack.config.js
-
-- デフォルトのエントリーポイントは `index.js`
-- デフォルトのアウトプットは `dist/main.js`
-
-path
-
-path.resolve(__dirname, "")
-
-### 中身の確認
-
-```shell
-% code dist/.main.js
-```
-
-### Git
-
-- .gitignoreの作成
-- Githubへpush
-
-　　
-　　
+- Webpackの設定ファイルを使ったビルド
+  - `./webpack.config.js`
+- ローダーのインストール
+  - `npm install`コマンド
+- CSSを読み込んでスタイルを適応させる
+  - css-loader / style-loader
 
 このブランチで行ったこと
 --------------------------------
 
-### ビルドされたJSを使ってみる
+#### 問題 1
+技術的な観点：
+たしかにスタイルは適応されているので、見た目は問題ない。
+ただし、CSSが肥大化してくるとHTMLサイズが大きくなってしまうし、すべてのHTMLでスタイル定義が注入されるのは無駄。
 
-#### HTMLファイル作成
+- `.css` を別ファイルに切り出し、そのファイルを毎回参照すれば良い。すべてのHTMLファイルが軽量化する。
+- しかもブラウザがCSSをキャッシュしてくれるので、初回アクセス以降はどのページを閲覧してもCSSファイル分の通信が節約できる。
+
+#### 問題 2
+ビジネス観点：
+従来の静的ウェブサイトのファイル構造と異なるため、受託案件の納品の際に困ることがある。
+クライアントサイドでサイト更新を行う場合に、Webpackの使用を強制することになる。
+
+- `.html / .css / .js` という従来通りの構成にしておけば、納品トラブルが避けられる。
+- その上で、ビルドツールも提供してあげると喜ばれる。
+
+
+### プラグインのインストール
+
+CSSを別ファイルに出力するには `MiniCssExtractPlugin` というプラグインを使用します。
+
+```shell
+% npm view mini-css-extract-plugin
+# latest: 0.9.0
+
+% npm install --save-dev mini-css-extract-plugin@0.9.0
+```
+
+### プラグインを使用する
+
+Webpackの設定ファイルを編集します。
+
+```shell
+code ./webpack.config.js
+```
+
+```js
+// webpack.config.js
+
+// 追加
+const MiniCssExtractPlugin = require('mini-css-extract-plugin');
+
+module.exports = {
+
+  // ...
+
+  module: {
+    rules: [
+      {
+        test: /\.css/,
+        use: [
+          {
+            // loader: 'style-loader', 削除
+            loader: MiniCssExtractPlugin.loader, // 追加
+          },
+          {
+            loader: 'css-loader',
+          }
+        ],
+      },
+    ],
+  },
+  // 追加
+  plugins: [
+    new MiniCssExtractPlugin(),
+  ],
+};
+```
+
+```shell
+% npx webpack --mode=development
+```
+
+ビルドすると `/dist/main.css` が新規に出力される。
+ファイルとして出力されるので、HTMLにインジェクトする役割の`style-loader`は不要になります。
+
+中身を確認。
+
+```shell
+code ./dist/main.css
+```
+
+```css
+body {
+  color: lightblue;
+}
+```
+
+先程までHTML内にインジェクトされていたスタイルシートがファイルとして抽出された。
+
+### HTMLページに適応する
+
+```shell
+% open -a "Google Chrome" ./dist/index.html
+```
+
+このままだと、先程HTML内に記述されたスタイルシートが無くなっているだけなので、
+文字の色はデフォルトに戻ってしまっている。
 
 ```shell
 % code ./dist/index.html
 ```
 
-```shell
-% code ./src/modules/my.js
-```
-
-```js
-// index.js
-import './modules/my.js'
-```
-
-
 ```html
-<!-- index.js -->
-<script src="./main.js"></script>
+<!-- /dist/index.html -->
+...
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Test Page</title>
+  <link rel="stylesheet" href="./main.css"> <!-- 追加 -->
+</head>
+
+...
 ```
 
-#### ブラウザで確認
+上のように出力されたCSSをHTMLに読み込んで、
+ブラウザをリロードするとスタイルが適応されて文字の色が変更される。
+
+`/dist/my.css` の内容がそのままコピーされている状態に見えますが、CSSが一旦モジュールとしてJavascriptに読み込まれ、Webpackのプラグインによって再度ファイルとして切り出されているので、完全に別のファイルです。
+
+今の段階だと単に回りくどいだけのように思えますが、効率化のための準備ですので、このまま進めてください。
+
+### HTMLファイルも自動で出力する
+
+今のままだと `/dist/index.html` を編集して、JavascriptやCSSを読み込んでいます。
+事情を知っている人は理解できますが、初めてこのファイルを見る人には親切ではない状態です。
+
+編集は`/src`の中で全て行い、ビルドコマンドを実行して作成された`/dist`の中身は変更しないのがベスト。
+混乱を避けるため、あるファイルは`/src`を編集し、別のファイルは`/dist`を編集するという状況を改善したいと思います。
+
+#### html-webpack-plugin をインストール
+
+- [html-webpack-plugin](https://github.com/jantimon/html-webpack-plugin)
+
+このプラグインを使うと、HTMLが自動で出力されます。
+出力されるHTMLにはWebpackでビルドされるJavascriptとCSSが配置されています。
 
 ```shell
-% open -a "Google Chrome" dist/index.html
+% npm view html-webpack-plugin
+#  latest: 3.2.0
+
+% npm install --save-dev html-webpack-plugin@3.2.0
 ```
 
-```
-// Chrome Console
-This is index.js
-main.js:1 this is module
-```
-
-### 設定ファイルを使用してビルドする
+#### プラグインを使用する設定を追加
 
 ```shell
 % code webpack.config.js
 ```
 
 ```js
-module.exports = {
-  entry: './src/index.js',
-  output: {
-    path: path.resolve(__dirname, './dist'),
-  },
-};
-```
-
-### この状態でビルドするとエラー
-
-```shell
-% npx webpack --mode=development
-
-Invalid configuration object. Webpack has been initialised using a configuration object that does not match the API schema.
- - configuration.output.path: The provided value "./dist/main.js" is not an absolute path!
-   -> The output directory as **absolute path** (required).
-```
-
-#### output.path は絶対パスを指定する
-
-```js
-const path = require('path');
-
-module.exports = {
-  entry: './src/index.js',
-  output: {
-    path: path.resolve(__dirname, './dist'),
-  },
-};
-```
-
-#### 出力されるファイル名を変更してみる
-
-```js
-const path = require('path');
-
-module.exports = {
-  entry: './src/index.js',
-  output: {
-    path: path.resolve(__dirname, './dist'),
-    filename: 'index.js', // テストした後は main.js 戻す
-  },
-};
-```
-
-### スタイルシートを読み込んで見る
-
-```shell
-% code ./src/modules/my.css
-```
-
-```css
-/* ./src/modules/my.css */
-body {
-  color: lightblue;
-}
-```
-
-```js
-// ./src/index.js
-import my from './modules/my';
-import './modules/my.css'; // add
-
-console.log('This is index.js');
-my();
-```
-
-#### この状態でビルドするとエラー
-
-```shell
-% npx webpack --mode=development
-
-ERROR in ./src/modules/my.css 1:5
-Module parse failed: Unexpected token (1:5)
-You may need an appropriate loader to handle this file type, currently no loaders are configured to process this file. See https://webpack.js.org/concepts#loaders
-> body {
-|   color: lightblue;
-| }
-```
-
-#### ローダーをインストールする
-
-Webpackはjavascript。
-Javascript以外のファイルを読み込もうとするとエラーになる。
-読み込めるようにするにはローダーと呼ばれるライブラリが必要。
-
-- [css-loader](https://github.com/webpack-contrib/css-loader)
-- [style-loader](https://github.com/webpack-contrib/style-loader)
-
-```shell
-% npm view css-loader
-# latest: 3.4.2
-
-% npm view style-loader
-# latest: 1.1.3
-
-% npm install --save-dev css-loader@3.4.2 style-loader@1.1.3
-```
-
-#### 確認
-
-```shell
-% code package.json
-```
-
-```json
-{
-  "devDependencies": {
-    "css-loader": "^3.4.2",
-    "style-loader": "^1.1.3",
-    "webpack": "^4.41.5",
-    "webpack-cli": "^3.3.10"
-  }
-}
-```
-
-### ローダーを使う
-
-```shell
-code webpack.config.js
-```
-
-```js
 // webpack.config.js
+
+// 追加
+const HtmlWebpackPlugin = require('html-webpack-plugin');
+
 module.exports = {
-  entry: './src/index.js',
-  output: {
-    ...
-  },
-  // moduleを追加
-  module: {
-    rules: [
-      {
-        test: /\.css/,
-        use: [{
-          loader: 'css-loader',
-        }],
-      },
-    ],
-  },
-};
-```
-
-- moduleを追加してruleを設定する。
-- ruleは複数設定できるので配列で指定する。=> `rules`
-- `test:`はどのファイルが対象になるのかを、正規表現で記述。
-- `use:`はどのローダーを使用するかを設定します。
-
-```shell
-% npx webpack --mode=development
-```
-
-#### 動作確認
-
-index.html をブラウザで確認。正常に動作しているはず。
-
-#### main.js を確認してみる
-
-```shell
-% code ./dist/main.js
-
-eval("// Imports\nvar ___CSS_LOADER_API_IMPORT___ = __webpack_require__(/*! ../../node_modules/css-loader/dist/runtime/api.js */ \"./node_modules/css-loader/dist/runtime/api.js\");\nexports = ___CSS_LOADER_API_IMPORT___(false);\n// Module\nexports.push([module.i, \"body {\\n  color: lightblue;\\n}\\n\", \"\"]);\n// Exports\nmodule.exports = exports;\n\n\n//# sourceURL=webpack:///./src/modules/my.css?");
-
-# ↑
-# CSSらしき記述は見つかった
-#
-```
-
-```js
-// evalの次に下のコマンドを入れてみる
-console.log(exports[0][1]);
-```
-
-index.html を確認するとコンソールログが出力されている。
-
-```shell
-% open -a "Google Chrome" dist/index.html
-```
-
-```
-# スタイルが出力された
-body {
-  color: lightblue;
+  // ...
+  plugins: [
+    new MiniCssExtractPlugin(),
+    // 追加
+    new HtmlWebpackPlugin(),
+  ],
 }
-
-index.js:8 This is index.js
-my.js:3 this is module
 ```
 
-しかしスタイルが反映されていない。
-CSSは読み込まれているが、使用されていない状態。
-
-### style-loader を使う
-
-```js
-// webpack.config.js
-        use: [
-          // 追記
-          {
-            loader: 'style-loader',
-          },
-          {
-            loader: 'css-loader',
-          }
-        ],
-```
-
-loaderは下から順に読み込まれていくので注意
-
-再度ビルドする。
+#### ビルドして確認
 
 ```shell
 % npx webpack --mode=development
+
+     Asset       Size  Chunks             Chunk Names
+index.html  219 bytes          [emitted]
+  main.css   30 bytes    main  [emitted]  main
+   main.js   5.17 KiB    main  [emitted]  main
 ```
 
-#### main.js を確認してみる
+今までなかった`index.html`が出力されているログが確認できます。
+中身を確認しましょう。
 
 ```shell
-% code ./dist/main.js
-
-# !*** ./node_modules/style-loader/dist/runtime/injectStylesIntoStyleTag.js ***!
-
-# ↑
-# Styleタグを注入しているような記述
-#
+% code ./dist/index.html
 ```
-
-#### HTMLを確認する
-
-```shell
-% open -a "Google Chrome" dist/index.html
-```
-
-index.htmlをブラウザで開くと、文字の色が変わっているはず。
-開発者ツールでElementsを確認。
 
 ```html
-<style>body {
-  color: lightblue;
-}
-</style>
+<!-- /dist/index.html -->
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Webpack App</title>
+  <link href="main.css" rel="stylesheet"></head>
+  <body>
+  <script type="text/javascript" src="main.js"></script></body>
+</html>
 ```
 
-スタイルシートがHTMLにインジェクトされている。
+自分で作成したファイルがなくなり、上の内容に置き換わっています。
+ブラウザで確認します。
 
-### すべてJavascriptにバンドルする方法の問題点
+```shell
+% open -a "Google Chrome" dist/index.html
+```
 
-#### CSSが適応される流れ
-- css-loaderでCSSをJavascriptに読み込む。
-- Webpackでビルドされた `.js` ファイルを `index.html` に配置。
-- 読み込まれたJavascriptがstyle-loaderによりHTMLにインジェクトされる。
+今まであったテキストは無くなり、完全なブランクページが表示されます。
+しかし、開発者ツールのConsoleを見ると、見覚えのあるログが出力されています。
+
+```
+This is index.js
+this is module
+```
+
+#### なにが起こっているのか
+
+- `html-webpack-plugin`によって自動でHTMLが出力されました。
+- それによって自分で作成した`index.html`は削除されました（上書きされた）
+- 新しい`index.html`にはエントリーポイントとして指定したJavascriptが自動で配置されています。
+- エントリーポイントではCSSファイルも読み込んでいますので、先の`mini-css-extract-plugin`によって個別ファイルとして出力されています。
+- CSSの読み込みは`html-webpack-plugin`によって検知されており、出力されたCSSも`index.html`に自動で配置されています。
+
+
+`html-webpack-plugin`はビルドしたファイルを含んだ`.html`を自動で作成してくれるプラグインです。
+ただし、これではコンテンツが空のままです。
+
+#### テンプレートを利用する
+
+`html-webpack-plugin`では、出力されるHTMLの雛形を指定することができます。
+まずは雛形となるHTMLファイルを作成しましょう。
+
+```shell
+% code ./src/index.html
+```
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Template HTML</title>
+</head>
+<body>
+  <h1>Hello World!</h1>
+</body>
+</html>
+```
+
+`.css`や`.js`ファイルは配置されていません。
+Webpackの設定ファイルを少し編集して、このHTMLをテンプレートとして使用します。
+
+```js
+// webpack.config.js
+
+module.exports = {
+  // ...
+  plugins: [
+    // ...
+    // 編集
+    new HtmlWebpackPlugin({
+      template: './src/index.html',
+    }),
+  ],
+}
+```
+
+この状態でビルドしてみましょう。
+
+```shell
+% npx webpack --mode=development
+
+Child html-webpack-plugin for "index.html":
+     1 asset
+    Entrypoint undefined = index.html
+    [./node_modules/html-webpack-plugin/lib/loader.js!./src/index.html] 486 bytes {0} [built]
+    [./node_modules/webpack/buildin/global.js] (webpack)/buildin/global.js 472 bytes {0} [built]
+    [./node_modules/webpack/buildin/module.js] (webpack)/buildin/module.js 497 bytes {0} [built]
+```
+
+`./src/index.html` が使用されているログが確認できます。
+ブラウザで確認してみてください。
+
+```shell
+% open -a "Google Chrome" dist/index.html
+```
+
+今度は`Hello World!`という文字が表示されたかと思います。
+Javascriptも読み込まれていますので、ブラウザのConsoleでも今まで通りのログが流れています。
+
+ファイルも確認してみてください。
+
+```shell
+% code ./dist/index.html
+```
+
+この2行が自動で挿入されているのが確認できます。
+
+```html
+<!-- /dist/index.html -->
+<link href="main.css" rel="stylesheet"></head>
+<script type="text/javascript" src="main.js"></script>
+```
+
+テンプレートを使用することで`html-webpack-plugin`を使用しつつ、自分のコンテンツを表示することができました。
+
+これによって`/dist`フォルダのすべてのファイルは、ビルドの結果になりました。
+`/dist`をフォルダごと削除して、再度ビルドコマンドを実行してみても、常に同じファイルが生成されます。
+
+制作者が変更ファイルは`/scr`フォルダの中に集まり、メンテナンス性が格段に向上した状態です。
+
+このdistディレクトリ上のファイルが削除されても、
+srcディレクトリでビルドできるのはいかに重要かわかってくる
